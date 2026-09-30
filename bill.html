@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Bill</title>
+<link rel="stylesheet" href="styles.css">
+<script src="app.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <div class="app-header-inner">
+    <a class="icon-btn" id="backBtn" href="#" aria-label="Back"></a>
+    <h1 id="title">New bill</h1>
+    <button class="icon-btn" id="menuBtn" aria-label="Menu" style="display:none"></button>
+  </div>
+</header>
+<main class="container no-nav" id="main"></main>
+<div id="modalRoot"></div>
+<script>
+(function(){
+  const params = new URLSearchParams(location.search);
+  const cid = params.get('customer');
+  const bid = params.get('id');
+
+  let customer = null;
+  let existing = null;
+  let items = [];
+  let paid = 0;
+  let readOnly = false;
+
+  document.getElementById('backBtn').innerHTML = icon('back');
+
+  if(bid){
+    existing = getBill(bid);
+    if(!existing){ location.replace('index.html'); return; }
+    customer = getCustomer(existing.customerId);
+    if(!customer){ location.replace('index.html'); return; }
+    items = (existing.items||[]).map(it => ({
+      itemId: it.itemId, name: it.name, price: Number(it.price)||0, qty: Number(it.qty)||0
+    }));
+    paid = Number(existing.paid)||0;
+    readOnly = true;
+    document.getElementById('title').textContent = 'Bill \u00B7 ' + fmtDate(existing.date || existing.createdAt);
+  } else if(cid){
+    customer = getCustomer(cid);
+    if(!customer){ location.replace('customers.html'); return; }
+    items = [];
+  } else {
+    location.replace('customers.html'); return;
+  }
+
+  document.getElementById('backBtn').href = 'customer.html?id=' + encodeURIComponent(customer.id);
+
+  const main = document.getElementById('main');
+  const menuBtn = document.getElementById('menuBtn');
+
+  if(readOnly){
+    menuBtn.style.display = '';
+    menuBtn.innerHTML = icon('trash');
+    menuBtn.addEventListener('click', () => {
+      if(confirm('Delete this bill?')){
+        deleteBill(existing.id);
+        recalcCustomerBalance(customer.id);
+        location.replace('customer.html?id=' + encodeURIComponent(customer.id));
+      }
+    });
+  }
+
+  // Copy customer phone on the first click/tap anywhere on the page
+(function copyPhoneOnFirstTap(){
+  const phone = String(customer.phone || '').trim();
+  if(!phone) return;
+
+  function doCopy(){
+    document.removeEventListener('click',      doCopy, true);
+    document.removeEventListener('touchstart', doCopy, true);
+    document.removeEventListener('keydown',    doCopy, true);
+    copyToClipboard(phone).then(ok => {
+      if(ok) toast('Number copied: ' + phone);
+    });
+  }
+
+  document.addEventListener('click',      doCopy, true);
+  document.addEventListener('touchstart', doCopy, true);
+  document.addEventListener('keydown',    doCopy, true);
+})();
+
+  function renderShell(){
+    main.innerHTML =
+      '<div class="card" style="padding:14px;margin-bottom:12px">'
+      + '<div class="row" style="gap:12px">'
+      + '<div class="avatar">' + esc((customer.name||'?').slice(0,2).toUpperCase()) + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-weight:600">' + esc(customer.name) + '</div>'
+      + '<div class="text-sm text-muted">' + esc(customer.phone||'') + '</div>'
+      + '</div>'
+      + '</div>'
+      + '</div>'
+
+      + '<div class="card" style="margin-bottom:12px">'
+      + '<div id="itemsList"></div>'
+      + (readOnly ? '' : '<div style="padding:12px;border-top:1px solid var(--border)">'
+        + '<button class="btn btn-block" id="addItem" type="button">' + icon('plus',18) + ' Add item</button>'
+        + '</div>')
+      + '</div>'
+
+      + '<div class="card" style="padding:16px;margin-bottom:12px">'
+      + '<div class="summary-row"><span>Total</span><span class="mono" id="totalVal"></span></div>'
+      + '<div class="summary-row"><span>Old balance</span><span class="mono" id="oldVal"></span></div>'
+      + '<div class="summary-row total"><span>Grand Total</span><span class="mono" id="grandVal"></span></div>'
+      + '<div class="form-group" style="margin-top:16px;margin-bottom:0">'
+      + '<label class="form-label">Paid today (optional)</label>'
+      + '<input class="input mono" type="number" inputmode="numeric" min="0" id="paidInput" value="' + paid + '"' + (readOnly ? ' disabled' : '') + '>'
+      + '</div>'
+      + '<div class="summary-row total"><span>New balance</span><span class="mono" id="newVal"></span></div>'
+      + '</div>'
+
+      + '<div class="section-title">Message preview</div>'
+      + '<div class="bill-preview" id="preview"></div>'
+
++ '<div class="row" style="margin-top:16px">'
++ '<button class="btn btn-primary" id="sendBtn" type="button" style="flex:1">'
++ icon('send',18) + (readOnly ? ' Resend text' : ' Send text')
++ '</button>'
++ '<button class="btn" id="imgBtn" type="button" style="flex:1">'
++ icon('image',18) + ' Send image'
++ '</button>'
++ '</div>';
+
+    const paidInput = document.getElementById('paidInput');
+    paidInput.addEventListener('input', () => {
+      paid = Number(paidInput.value) || 0;
+      recalc();
+    });
+
+    if(!readOnly){
+      document.getElementById('addItem').addEventListener('click', openPicker);
+    }
+
+    document.getElementById('sendBtn').addEventListener('click', onSend);
+    document.getElementById('imgBtn').addEventListener('click', onSendImage);
+  }
+
+  function renderItems(){
+    const list = document.getElementById('itemsList');
+    const dis = readOnly ? ' disabled' : '';
+    if(items.length === 0){
+      list.innerHTML = '<div class="empty" style="padding:32px 20px">'
+        + '<div class="text-sm">No items added yet</div>'
+        + '<div class="text-xs" style="margin-top:4px">Tap "Add item" below to pick from your item list</div>'
+        + '</div>';
+      return;
+    }
+    list.innerHTML = items.map((it, i) => {
+      const amt = (Number(it.qty)||0) * (Number(it.price)||0);
+      return '<div class="bill-row" data-i="' + i + '">'
+        + '<div class="bill-row-info">'
+        + '<div class="bill-row-name">' + esc(it.name) + '</div>'
+        + '<div class="bill-row-rate">' + fmtINR(it.price) + ' / unit</div>'
+        + '</div>'
+        + '<input class="bill-row-qty" type="number" inputmode="numeric" min="1" value="' + (it.qty||1) + '"' + dis + '>'
+        + '<div class="bill-row-amount">' + fmtINR(amt) + '</div>'
+        + (readOnly ? '<div></div>' : '<button class="icon-btn bill-row-del" type="button" aria-label="Remove">\u00D7</button>')
+        + '</div>';
+    }).join('');
+
+    if(readOnly) return;
+
+    list.oninput = e => {
+      const row = e.target.closest('.bill-row');
+      if(!row) return;
+      const i = Number(row.dataset.i);
+      const it = items[i];
+      if(!it) return;
+      if(e.target.classList.contains('bill-row-qty')){
+        it.qty = Math.max(1, Number(e.target.value) || 1);
+        const amt = (Number(it.qty)||0) * (Number(it.price)||0);
+        row.querySelector('.bill-row-amount').textContent = fmtINR(amt);
+        recalc();
+      }
+    };
+
+    list.onclick = e => {
+      const btn = e.target.closest('.bill-row-del');
+      if(!btn) return;
+      const row = btn.closest('.bill-row');
+      const i = Number(row.dataset.i);
+      items.splice(i, 1);
+      renderItems();
+      recalc();
+    };
+  }
+
+  function openPicker(){
+    const all = getItems();
+    if(all.length === 0){
+      mountModal(
+        '<div class="modal">'
+        + '<h2 style="font-size:18px;font-weight:600;margin-bottom:8px">No items yet</h2>'
+        + '<p class="text-sm text-muted" style="margin-bottom:16px">Add items first and they will appear here for quick selection.</p>'
+        + '<a class="btn btn-primary btn-block" href="items.html">Go to Items</a>'
+        + '<button class="btn btn-block" style="margin-top:8px" data-cancel>Cancel</button>'
+        + '</div>',
+        root => root.querySelector('[data-cancel]').addEventListener('click', closeModal)
+      );
+      return;
+    }
+
+    const inBill = {};
+    items.forEach(it => { inBill[it.itemId] = (inBill[it.itemId]||0) + 1; });
+
+    mountModal(
+      '<div class="modal" style="padding-bottom:0">'
+      + '<h2 style="font-size:18px;font-weight:600;margin-bottom:12px">Pick items</h2>'
+      + '<div style="position:relative;margin-bottom:12px">'
+      + '<span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);display:flex">' + icon('search',18) + '</span>'
+      + '<input class="input" id="pickerSearch" placeholder="Search items" style="padding-left:40px">'
+      + '</div>'
+      + '<div id="pickerList" style="margin:0 -20px;max-height:50vh;overflow-y:auto;border-top:1px solid var(--border)"></div>'
+      + '<div style="padding:16px 0 20px;margin:0 -20px;padding-left:20px;padding-right:20px;border-top:1px solid var(--border);position:sticky;bottom:0;background:var(--surface)">'
+      + '<button class="btn btn-primary btn-block" id="pickerDone">Done</button>'
+      + '</div>'
+      + '</div>',
+      root => {
+        const list = root.querySelector('#pickerList');
+        const search = root.querySelector('#pickerSearch');
+
+        function renderList(){
+          const q = search.value.trim().toLowerCase();
+          const filtered = q ? all.filter(i => i.name.toLowerCase().includes(q)) : all;
+          if(filtered.length === 0){
+            list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">No matches</div>';
+            return;
+          }
+          list.innerHTML = filtered.map(it => {
+            const qtyInBill = inBill[it.id] || 0;
+            return '<button class="picker-item" data-id="' + esc(it.id) + '">'
+              + '<div class="picker-item-add' + (qtyInBill ? ' picker-item-added' : '') + '">'
+              + (qtyInBill ? icon('check',18) : icon('plus',18))
+              + '</div>'
+              + '<div class="list-item-content">'
+              + '<div class="list-item-title">' + esc(it.name) + '</div>'
+              + '<div class="list-item-sub">' + fmtINR(it.price) + ' per unit' + (qtyInBill ? ' \u00B7 \u00D7' + qtyInBill : '') + '</div>'
+              + '</div>'
+              + '</button>';
+          }).join('');
+        }
+
+        list.addEventListener('click', e => {
+          const btn = e.target.closest('.picker-item');
+          if(!btn) return;
+          const id = btn.dataset.id;
+          const src = all.find(i => i.id === id);
+          if(!src) return;
+          const existingRow = items.find(i => i.itemId === id);
+          if(existingRow){
+            existingRow.qty += 1;
+          } else {
+            items.push({ itemId: src.id, name: src.name, price: src.price, qty: 1 });
+          }
+          inBill[id] = (inBill[id] || 0) + 1;
+          renderList();
+          renderItems();
+          recalc();
+        });
+
+        search.addEventListener('input', renderList);
+        root.querySelector('#pickerDone').addEventListener('click', closeModal);
+        renderList();
+      }
+    );
+  }
+
+  function computeTotals(){
+    const total = items.reduce((s, i) => s + (Number(i.qty)||0)*(Number(i.price)||0), 0);
+    const oldBalance = existing ? (Number(existing.oldBalance)||0) : (Number(customer.balance)||0);
+    const grandTotal = total + oldBalance;
+    const newBalance = grandTotal - paid;
+    return { total, oldBalance, grandTotal, newBalance };
+  }
+
+  function recalc(){
+    const t = computeTotals();
+    document.getElementById('totalVal').textContent = fmtINR(t.total);
+    document.getElementById('oldVal').textContent = fmtINR(t.oldBalance);
+    document.getElementById('grandVal').textContent = fmtINR(t.grandTotal);
+    document.getElementById('newVal').textContent = fmtINR(t.newBalance);
+    document.getElementById('preview').textContent = buildBillText({
+      date: existing ? (existing.date || existing.createdAt) : Date.now(),
+      items: items,
+      total: t.total,
+      oldBalance: t.oldBalance,
+      grandTotal: t.grandTotal,
+      paid: paid
+    });
+  }
+
+  function onSend(){
+    const cleanItems = items
+      .filter(i => (Number(i.qty)||0) > 0)
+      .map(i => ({ itemId:i.itemId, name:i.name, price:Number(i.price)||0, qty:Number(i.qty)||0 }));
+    if(cleanItems.length === 0){ toast('Add at least one item'); return; }
+    if(!customer.phone){ toast('Customer has no phone'); return; }
+
+    const t = computeTotals();
+    const bill = saveBill({
+      id: existing ? existing.id : undefined,
+      customerId: customer.id,
+      date: existing ? (existing.date || existing.createdAt) : Date.now(),
+      items: cleanItems,
+      total: t.total,
+      oldBalance: t.oldBalance,
+      grandTotal: t.grandTotal,
+      paid: paid,
+      createdAt: existing ? existing.createdAt : Date.now()
+    });
+
+    const d = loadData();
+    const idx = d.customers.findIndex(c => c.id === customer.id);
+    if(idx !== -1){
+      d.customers[idx].balance = t.newBalance;
+      saveData(d);
+    }
+
+    openWa(waLink(customer.phone, buildBillText(bill)));
+
+    if(!existing){
+      toast('Bill saved');
+      setTimeout(()=> location.href = 'customer.html?id=' + encodeURIComponent(customer.id), 400);
+    } else {
+      toast('Bill updated');
+    }
+  }
+
+
+  async function onSendImage(){
+  const cleanItems = items
+    .filter(i => (Number(i.qty)||0) > 0)
+    .map(i => ({ itemId:i.itemId, name:i.name, price:Number(i.price)||0, qty:Number(i.qty)||0 }));
+  if(cleanItems.length === 0){ toast('Add at least one item'); return; }
+  if(!customer.phone){ toast('Customer has no phone'); return; }
+
+  const t = computeTotals();
+
+  // Save bill first (same as onSend) so seq/date persist
+  const bill = saveBill({
+    id: existing ? existing.id : undefined,
+    customerId: customer.id,
+    date: existing ? (existing.date || existing.createdAt) : Date.now(),
+    items: cleanItems,
+    total: t.total,
+    oldBalance: t.oldBalance,
+    grandTotal: t.grandTotal,
+    paid: paid,
+    seq: existing ? existing.seq : nextBillSeq(customer.id),
+    createdAt: existing ? existing.createdAt : Date.now()
+  });
+
+  const d = loadData();
+  const idx = d.customers.findIndex(c => c.id === customer.id);
+  if(idx !== -1){
+    d.customers[idx].balance = t.newBalance;
+    saveData(d);
+  }
+
+  try {
+    await shareBillImage(bill, customer, getSettings());
+    if(!existing){
+      setTimeout(()=> location.href = 'customer.html?id=' + encodeURIComponent(customer.id), 800);
+    }
+  } catch(err){
+    toast('Could not create image');
+    console.error(err);
+  }
+}
+  renderShell();
+  renderItems();
+  recalc();
+})();
+</script>
+</body>
+</html>

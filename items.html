@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Items</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="app.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <div class="app-header-inner">
+    <h1>Items</h1>
+  </div>
+</header>
+<main class="container" id="main"></main>
+<button class="fab" id="addBtn" aria-label="Add item"></button>
+<nav class="bottom-nav">
+  <a href="index.html" id="navHome"></a>
+  <a href="customers.html" id="navCustomers"></a>
+  <a href="items.html" class="active" id="navItems"></a>
+</nav>
+<div id="modalRoot"></div>
+<script>
+(function(){
+  document.getElementById('navHome').innerHTML = icon('home',22) + '<span>Home</span>';
+  document.getElementById('navCustomers').innerHTML = icon('users',22) + '<span>Customers</span>';
+  document.getElementById('navItems').innerHTML = icon('box',22) + '<span>Items</span>';
+  document.getElementById('addBtn').innerHTML = icon('plus',26);
+
+  const main = document.getElementById('main');
+
+  function render(){
+    const list = getItems();
+    if(list.length === 0){
+      main.innerHTML = '<div class="empty">'
+        + '<div class="empty-icon">' + icon('box',28) + '</div>'
+        + '<div style="font-weight:500;color:#0f172a">No items yet</div>'
+        + '<div class="text-sm" style="margin-top:4px">Tap + to add your first item</div>'
+        + '</div>';
+      return;
+    }
+    main.innerHTML = '<div class="card">' + list.map(it =>
+      '<div class="list-item" style="cursor:default">'
+      + '<div class="avatar" style="background:#f0fdfa;color:#0d9488">' + icon('box',18) + '</div>'
+      + '<div class="list-item-content">'
+      + '<div class="list-item-title">' + esc(it.name) + '</div>'
+      + '<div class="list-item-sub">per unit</div>'
+      + '</div>'
+      + '<div class="list-item-amount">' + fmtINR(it.price) + '</div>'
+      + '<button class="icon-btn" data-edit="' + esc(it.id) + '">' + icon('edit',18) + '</button>'
+      + '<button class="icon-btn" data-del="' + esc(it.id) + '">' + icon('trash',18) + '</button>'
+      + '</div>'
+    ).join('') + '</div>';
+  }
+
+  function openForm(editing){
+    const title = editing ? 'Edit item' : 'Add item';
+    mountModal(
+      '<form class="modal" id="f" novalidate>'
+      + '<h2 style="font-size:18px;font-weight:600;margin-bottom:16px">' + title + '</h2>'
+      + '<div class="form-group"><label class="form-label">Name</label>'
+      + '<input class="input" name="name" required value="' + (editing ? esc(editing.name) : '') + '" placeholder="e.g. Basmati rice 1kg"></div>'
+      + '<div class="form-group"><label class="form-label">Price per unit (\u20B9)</label>'
+      + '<input class="input mono" name="price" type="number" inputmode="decimal" min="0" step="0.01" required value="' + (editing ? editing.price : '') + '" placeholder="0"></div>'
+      + '<div class="row" style="margin-top:20px">'
+      + '<button type="button" class="btn" data-cancel style="flex:1">Cancel</button>'
+      + '<button type="submit" class="btn btn-primary" style="flex:1">' + (editing ? 'Save' : 'Add') + '</button>'
+      + '</div>'
+      + '</form>',
+      root => {
+        root.querySelector('[data-cancel]').addEventListener('click', closeModal);
+        root.querySelector('#f').addEventListener('submit', e => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const name = String(fd.get('name')||'').trim();
+          const price = Number(fd.get('price'));
+          if(!name){ toast('Name required'); return; }
+          if(!(price >= 0)){ toast('Price must be a number'); return; }
+          upsertItem({ id: editing ? editing.id : undefined, name, price });
+          closeModal();
+          toast(editing ? 'Item updated' : 'Item added');
+          render();
+        });
+      }
+    );
+  }
+
+  document.getElementById('addBtn').addEventListener('click', () => openForm(null));
+  main.addEventListener('click', e => {
+    const editBtn = e.target.closest('[data-edit]');
+    if(editBtn){ openForm(getItem(editBtn.dataset.edit)); return; }
+    const delBtn = e.target.closest('[data-del]');
+    if(delBtn){
+      const it = getItem(delBtn.dataset.del);
+      if(it && confirm('Delete "' + it.name + '"?')){
+        removeItem(it.id);
+        toast('Item removed');
+        render();
+      }
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

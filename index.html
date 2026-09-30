@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Invoicer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&family=Playfair+Display:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="app.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <div class="app-header-inner">
+    <h1>Invoicer</h1>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings"></button>
+  </div>
+</header>
+<main class="container" id="main"></main>
+<nav class="bottom-nav">
+  <a href="index.html" class="active" id="navHome"></a>
+  <a href="customers.html" id="navCustomers"></a>
+  <a href="items.html" id="navItems"></a>
+</nav>
+<div id="modalRoot"></div>
+<script>
+(function(){
+  document.getElementById('navHome').innerHTML = icon('home',22) + '<span>Home</span>';
+  document.getElementById('navCustomers').innerHTML = icon('users',22) + '<span>Customers</span>';
+  document.getElementById('navItems').innerHTML = icon('box',22) + '<span>Items</span>';
+  document.getElementById('settingsBtn').innerHTML = icon('gear',20);
+
+  function render(){
+    const customers = getCustomers();
+    const items = getItems();
+    const bills = getBills();
+    const now = new Date();
+    const monthBills = bills.filter(b => {
+      const d = new Date(b.date || b.createdAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+    const monthTotal = monthBills.reduce((s,b)=>s+(Number(b.total)||0),0);
+    const totalBilled = bills.reduce((s,b)=>s+(Number(b.total)||0),0);
+    const outstanding = customers.reduce((s,c)=>s+(Number(c.balance)||0),0);
+    const recent = bills.slice(0,5);
+
+    const main = document.getElementById('main');
+    main.innerHTML =
+      '<div class="stats-grid">'
+      + '<div class="stat-card hero-card">'
+      + '<div class="stat-label">Outstanding</div>'
+      + '<div class="stat-value">' + fmtINR(outstanding) + '</div>'
+      + '</div>'
+      + '<div class="stat-card">'
+      + '<div class="stat-label">Customers</div>'
+      + '<div class="stat-value">' + customers.length + '</div>'
+      + '</div>'
+      + '<div class="stat-card">'
+      + '<div class="stat-label">Items</div>'
+      + '<div class="stat-value">' + items.length + '</div>'
+      + '</div>'
+      + '<div class="stat-card">'
+      + '<div class="stat-label">This month</div>'
+      + '<div class="stat-value">' + fmtINR(monthTotal) + '</div>'
+      + '</div>'
+      + '<div class="stat-card">'
+      + '<div class="stat-label">Total billed</div>'
+      + '<div class="stat-value">' + fmtINR(totalBilled) + '</div>'
+      + '</div>'
+      + '</div>'
+
+      + '<div class="quick-actions">'
+      + '<a class="quick-action" href="customers.html">'
+      + '<div class="quick-action-icon">' + icon('plus',18) + '</div>'
+      + '<span>New bill</span>'
+      + '</a>'
+      + '<a class="quick-action" href="customers.html">'
+      + '<div class="quick-action-icon">' + icon('users',18) + '</div>'
+      + '<span>Customers</span>'
+      + '</a>'
+      + '<a class="quick-action" href="items.html">'
+      + '<div class="quick-action-icon">' + icon('box',18) + '</div>'
+      + '<span>Items</span>'
+      + '</a>'
+      + '</div>'
+
+      + '<div class="section-title">Recent bills</div>'
+      + (recent.length === 0
+        ? '<div class="card"><div class="empty">'
+          + '<div class="empty-icon">' + icon('doc',28) + '</div>'
+          + '<div style="font-weight:500;color:#0f172a">No bills yet</div>'
+          + '<div class="text-sm" style="margin-top:4px">Open a customer and create one</div>'
+          + '</div></div>'
+        : '<div class="card">' + recent.map(b => {
+            const c = getCustomer(b.customerId);
+            const seq = b.seq ? '#' + String(b.seq).padStart(4,'0') + ' \u00B7 ' : '';
+            return '<a class="list-item" href="bill.html?id=' + encodeURIComponent(b.id) + '">'
+              + '<div class="avatar">' + esc(((c && c.name) || '?').slice(0,2).toUpperCase()) + '</div>'
+              + '<div class="list-item-content">'
+              + '<div class="list-item-title">' + esc((c && c.name) || 'Deleted customer') + '</div>'
+              + '<div class="list-item-sub">' + seq + fmtDate(b.date || b.createdAt) + '</div>'
+              + '</div>'
+              + '<div class="list-item-amount">' + fmtINR(b.grandTotal) + '</div>'
+              + '</a>';
+          }).join('') + '</div>');
+  }
+
+  function openSettings(){
+    const s = getSettings();
+    mountModal(
+      '<form class="modal" id="f" novalidate>'
+      + '<h2 style="font-size:18px;font-weight:600;margin-bottom:16px">Settings</h2>'
+      + '<div class="form-group"><label class="form-label">Business name</label>'
+      + '<input class="input" name="businessName" required value="' + esc(s.businessName || '') + '" placeholder="e.g. Mahakaal Enterprises"></div>'
+      + '<p class="text-xs text-muted" style="margin-top:-6px;margin-bottom:16px">Appears on the invoice image header.</p>'
+      + '<div class="row" style="margin-top:8px">'
+      + '<button type="button" class="btn" data-cancel style="flex:1">Cancel</button>'
+      + '<button type="submit" class="btn btn-primary" style="flex:1">Save</button>'
+      + '</div>'
+      + '</form>',
+      root => {
+        root.querySelector('[data-cancel]').addEventListener('click', closeModal);
+        root.querySelector('#f').addEventListener('submit', e => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const businessName = String(fd.get('businessName')||'').trim() || 'My Business';
+          saveSettings({ businessName });
+          closeModal();
+          toast('Saved');
+        });
+      }
+    );
+  }
+
+  document.getElementById('settingsBtn').addEventListener('click', openSettings);
+  render();
+})();
+</script>
+</body>
+</html>

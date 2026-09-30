@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Customer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="app.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <div class="app-header-inner">
+    <a class="icon-btn" id="backBtn" href="customers.html" aria-label="Back"></a>
+    <h1 id="title">Customer</h1>
+    <button class="icon-btn" id="menuBtn" aria-label="Menu"></button>
+  </div>
+</header>
+<main class="container no-nav" id="main"></main>
+<a class="fab" id="billBtn" aria-label="New bill"></a>
+<div id="modalRoot"></div>
+<script>
+(function(){
+  const cid = qs('id');
+  if(!cid || !getCustomer(cid)){ location.replace('customers.html'); return; }
+
+  document.getElementById('backBtn').innerHTML = icon('back');
+  const menuBtn = document.getElementById('menuBtn');
+  menuBtn.innerHTML = icon('dots');
+
+  const main = document.getElementById('main');
+  const titleEl = document.getElementById('title');
+  const billBtn = document.getElementById('billBtn');
+  billBtn.innerHTML = icon('plus',26);
+  billBtn.href = 'bill.html?customer=' + encodeURIComponent(cid);
+
+  menuBtn.addEventListener('click', openMenu);
+
+  function render(){
+    const c = getCustomer(cid);
+    titleEl.textContent = c.name;
+    const bills = getBills(cid);
+    main.innerHTML =
+      '<div class="card" style="padding:16px;margin-bottom:12px">'
+      + '<div class="row" style="gap:12px">'
+      + '<div class="avatar" style="width:48px;height:48px;font-size:15px">' + esc((c.name||'?').slice(0,2).toUpperCase()) + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-weight:600;font-size:16px">' + esc(c.name) + '</div>'
+      + '<div class="text-sm text-muted">' + esc(c.phone||'') + '</div>'
+      + '</div>'
+      + '</div>'
+      + (c.note ? '<div class="text-sm text-muted" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">' + esc(c.note) + '</div>' : '')
+      + '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">'
+      + '<div class="text-sm text-muted">Outstanding balance</div>'
+      + '<div style="font-size:26px;font-weight:600;font-family:ui-monospace,monospace;margin-top:2px">' + fmtINR(c.balance||0) + '</div>'
+      + '</div>'
+      + '</div>'
+
+      + '<div class="section-title">Bills</div>'
+      + (bills.length === 0
+        ? '<div class="card"><div class="empty"><div>No bills yet</div><div class="text-sm" style="margin-top:4px">Tap + to create one</div></div></div>'
+        : '<div class="card">' + bills.map(b => {
+            const seq = b.seq ? '#' + String(b.seq).padStart(4,'0') + ' \u00B7 ' : '';
+            return '<a class="list-item" href="bill.html?id=' + encodeURIComponent(b.id) + '">'
+              + '<div class="list-item-content">'
+              + '<div class="list-item-title">' + seq + fmtDate(b.date || b.createdAt) + '</div>'
+              + '<div class="list-item-sub">' + (b.items||[]).length + ' item' + ((b.items||[]).length===1?'':'s')
+              + (Number(b.paid)>0 ? ' \u00B7 Paid ' + fmtINR(b.paid) : '')
+              + '</div>'
+              + '</div>'
+              + '<div class="list-item-amount">' + fmtINR(b.grandTotal) + '</div>'
+              + '</a>';
+          }).join('') + '</div>');
+  }
+
+  function openMenu(){
+    const c = getCustomer(cid);
+    mountModal(
+      '<div class="modal">'
+      + '<h2 style="font-size:18px;font-weight:600;margin-bottom:16px">' + esc(c.name) + '</h2>'
+      + '<button class="btn btn-block" style="margin-bottom:8px" data-edit>' + icon('edit',18) + ' Edit</button>'
+      + '<button class="btn btn-danger btn-block" style="margin-bottom:8px" data-del>' + icon('trash',18) + ' Delete customer</button>'
+      + '<button class="btn btn-block" data-cancel>Cancel</button>'
+      + '</div>',
+      root => {
+        root.querySelector('[data-cancel]').addEventListener('click', closeModal);
+        root.querySelector('[data-edit]').addEventListener('click', openEdit);
+        root.querySelector('[data-del]').addEventListener('click', () => {
+          if(confirm('Delete this customer and all their bills?')){
+            removeCustomer(cid);
+            location.replace('customers.html');
+          }
+        });
+      }
+    );
+  }
+
+  function openEdit(){
+    const c = getCustomer(cid);
+    mountModal(
+      '<form class="modal" id="f" novalidate>'
+      + '<h2 style="font-size:18px;font-weight:600;margin-bottom:16px">Edit customer</h2>'
+      + '<div class="form-group"><label class="form-label">Name</label>'
+      + '<input class="input" name="name" required value="' + esc(c.name) + '"></div>'
+      + '<div class="form-group"><label class="form-label">Phone</label>'
+      + '<input class="input" name="phone" type="tel" inputmode="tel" required value="' + esc(c.phone) + '"></div>'
+      + '<div class="form-group"><label class="form-label">Note (optional)</label>'
+      + '<input class="input" name="note" value="' + esc(c.note||'') + '"></div>'
+      + '<div class="row" style="margin-top:20px">'
+      + '<button type="button" class="btn" data-cancel style="flex:1">Cancel</button>'
+      + '<button type="submit" class="btn btn-primary" style="flex:1">Save</button>'
+      + '</div>'
+      + '</form>',
+      root => {
+        root.querySelector('[data-cancel]').addEventListener('click', closeModal);
+        root.querySelector('#f').addEventListener('submit', e => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const name = String(fd.get('name')||'').trim();
+          const phone = String(fd.get('phone')||'').trim();
+          if(!name || !phone){ toast('Name and phone required'); return; }
+          upsertCustomer({ id:cid, name, phone, note: String(fd.get('note')||'').trim() });
+          closeModal();
+          toast('Saved');
+          render();
+        });
+      }
+    );
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

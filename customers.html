@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Customers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="app.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <div class="app-header-inner">
+    <h1>Customers</h1>
+  </div>
+</header>
+<main class="container" id="main"></main>
+<button class="fab" id="addBtn" aria-label="Add customer"></button>
+<nav class="bottom-nav">
+  <a href="index.html" id="navHome"></a>
+  <a href="customers.html" class="active" id="navCustomers"></a>
+  <a href="items.html" id="navItems"></a>
+</nav>
+<div id="modalRoot"></div>
+<script>
+(function(){
+  document.getElementById('navHome').innerHTML = icon('home',22) + '<span>Home</span>';
+  document.getElementById('navCustomers').innerHTML = icon('users',22) + '<span>Customers</span>';
+  document.getElementById('navItems').innerHTML = icon('box',22) + '<span>Items</span>';
+  document.getElementById('addBtn').innerHTML = icon('plus',26);
+
+  const main = document.getElementById('main');
+
+  function render(){
+    const list = getCustomers();
+    if(list.length === 0){
+      main.innerHTML = '<div class="empty">'
+        + '<div class="empty-icon">' + icon('user',28) + '</div>'
+        + '<div style="font-weight:500;color:#0f172a">No customers yet</div>'
+        + '<div class="text-sm" style="margin-top:4px">Tap + to add your first customer</div>'
+        + '</div>';
+      return;
+    }
+    main.innerHTML = '<div class="card">' + list.map(c =>
+      '<a class="list-item" href="customer.html?id=' + encodeURIComponent(c.id) + '">'
+      + '<div class="avatar">' + esc((c.name||'?').slice(0,2).toUpperCase()) + '</div>'
+      + '<div class="list-item-content">'
+      + '<div class="list-item-title">' + esc(c.name) + '</div>'
+      + '<div class="list-item-sub">' + esc(c.phone||'') + '</div>'
+      + '</div>'
+      + '<div class="list-item-amount">' + fmtINR(c.balance||0) + '</div>'
+      + '</a>'
+    ).join('') + '</div>';
+  }
+
+  function openAdd(){
+    mountModal(
+      '<form class="modal" id="f" novalidate>'
+      + '<h2 style="font-size:18px;font-weight:600;margin-bottom:16px">Add customer</h2>'
+      + '<div class="form-group"><label class="form-label">Name</label><input class="input" name="name" required></div>'
+      + '<div class="form-group"><label class="form-label">Phone</label><input class="input" name="phone" type="tel" inputmode="tel" required></div>'
+      + '<div class="form-group"><label class="form-label">Note (optional)</label><input class="input" name="note"></div>'
+      + '<div class="row" style="margin-top:20px">'
+      + '<button type="button" class="btn" data-cancel style="flex:1">Cancel</button>'
+      + '<button type="submit" class="btn btn-primary" style="flex:1">Add</button>'
+      + '</div>'
+      + '</form>',
+      root => {
+        root.querySelector('#f').addEventListener('submit', e => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const name = String(fd.get('name')||'').trim();
+          const phone = String(fd.get('phone')||'').trim();
+          if(!name || !phone){ toast('Name and phone required'); return; }
+          upsertCustomer({ name, phone, note: String(fd.get('note')||'').trim(), balance:0 });
+          closeModal();
+          toast('Customer added');
+          render();
+        });
+        root.querySelector('[data-cancel]').addEventListener('click', closeModal);
+      }
+    );
+  }
+
+  document.getElementById('addBtn').addEventListener('click', openAdd);
+  render();
+})();
+</script>
+</body>
+</html>
